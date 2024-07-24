@@ -50,7 +50,7 @@ class ProgressBar(pl.callbacks.TQDMProgressBar):
         items.pop("v_num", None)
         if trainer.optimizers:
             current_lr = trainer.optimizers[0].param_groups[0]['lr']
-            items["lr"] = f"{current_lr:.10f}"  # 格式化学习率显示
+            items["lr"] = f"{current_lr:.5e}"  # 格式化学习率显示
         items["name"] = f"{self.config.get('name', '')}"
         items["version"] = f"{self.config.get('version', '')}"
         return items
@@ -65,20 +65,6 @@ def train(config):
 
     model_module = ModelPLModule(config)
     data_module = DataPLModule(config)
-
-    # add datasets to data_module
-    datasets = {"train": [], "validation": []}
-    for i, dataset_name_or_path in enumerate(config.dataset_name_or_paths):
-        for split in ["train", "validation"]:
-            datasets[split].append(
-                MyDataset(
-                    model_module.processor,
-                    dataset_name_or_path=dataset_name_or_path,
-                    split=split,
-                )
-            )
-    data_module.train_datasets = datasets["train"]
-    data_module.val_datasets = datasets["validation"]
 
     logger = TensorBoardLogger(
         save_dir=config.save_path,

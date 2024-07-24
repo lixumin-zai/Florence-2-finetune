@@ -1,25 +1,25 @@
-name: "latex_rec"
-version: "0705"
+name: "angle"
+version: "0723"
 save_path: ""
 pretrain_model_path: ""
-dataset_name_or_paths: ["../dataset"]
+dataset_name_or_path: ""
 # Trainer
-devices: [0,1,2,3,4,5,6,7]
+devices: [0, 1, 2]
 verbose: True  # 打印保存信息
 num_nodes: 1
 seed: 42
-max_epochs: 3
+max_epochs: 5
 max_steps: -1
 val_check_interval: 1.0
 check_val_every_n_epoch: 1
 gradient_clip_val: 1.0
 #
-train_batch_sizes: [16] # 46G
-val_batch_sizes: [8]
+train_batch_size: 4
+val_batch_size: 8
 num_workers: 32
 #
-max_length: 512
-lr: 3e-5
-warmup_steps: 1000 # all_step * 10%
-num_training_samples_per_epoch: 4320  # 552000 / 16 / 8
-save_step: 4000
+max_length: 128
+lr: 5e-6
+warmup_steps: 500 # 不宜太高
+num_training_samples_per_epoch: 1666
+save_step: 1111

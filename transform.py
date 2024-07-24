@@ -14,6 +14,7 @@ import string
 import os
 import io
 
+FONT_PATH = ""
 
 def alb_wrapper(transform):
     def f(im):
@@ -129,7 +130,7 @@ class ConditionalRandomScale(alb.ImageOnlyTransform):
         else:
             pass
 
-        if img.shape[0] >= 320 or img.shape[1] >= 320:
+        if img.shape[0] >= 320 and img.shape[1] >= 320:
             return alb.RandomScale(scale_limit=self.scale_limit, p=1)(image=img)['image']
         else:
             return img
@@ -162,10 +163,9 @@ class Line_blur(alb.ImageOnlyTransform):
 def apply_watermark(src_image, text, text_size, rotation_angle):
     # Load the original image
     # Create a single watermark
-    font_path = ""
     watermark = np.zeros((random.randint(60, 200), random.randint(100, 400), 3), dtype=np.uint8)*255
     r, g, b = random.randint(0, 100), random.randint(0, 100), random.randint(0, 100)
-    watermark = put_text_husky(watermark, text, (r, g, b), text_size, font_path)
+    watermark = put_text_husky(watermark, text, (r, g, b), text_size, "Times New Roman")
 
     # Define horizontal and vertical repeat counts based on the size of the source image
     h_repeat = src_image.shape[1] // watermark.shape[1] + 1
@@ -189,7 +189,7 @@ def apply_watermark(src_image, text, text_size, rotation_angle):
     # image = np.where(image == (242, 242, 242), 255, image)
     return image
 
-def put_text_husky(img, text, color, font_size, font_path, italic=False, underline=False):
+def put_text_husky(img, text, color, font_size, font_name, italic=False, underline=False):
     # Convert OpenCV image to PIL format
     pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_img)
@@ -204,8 +204,8 @@ def put_text_husky(img, text, color, font_size, font_path, italic=False, underli
     # Load font or default
     try:
         # font = ImageFont.truetype(f'{font_name}{font_style}.ttf', font_size)
-        font_name = os.listdir(font_path)
-        font = ImageFont.truetype(f"{font_path}/{random.choice(font_name)}", font_size)
+        font_name = os.listdir(FONT_PATH)
+        font = ImageFont.truetype(f"{FONT_PATH}/{random.choice(font_name)}", font_size)
 
     except IOError:
         print(f"Font {font_name} with style {font_style} not found. Using default font.")
@@ -336,26 +336,22 @@ class add_shadown(alb.ImageOnlyTransform):
         new_img = add_random_shadows(img)  # 生成15个字符的水印文本
         return new_img
     
-
 ################################################################################################
-
 
 train_transform =  alb_wrapper(
     alb.Compose(
         [
-            ResizeIfNeeded(max_size=480, min_size=224, p = 1),
-            ConditionalRandomScale(scale_limit=(-0.4, 0), p=1),
-            ConditionalRandomScale(scale_limit=(0, 0.5), p=1, enlarge=True),
-            ResizeIfNeeded(max_size=480, min_size=224, p = 1),
-            alb.PadIfNeeded(min_height=480, min_width=480, border_mode=0, value=(255, 255, 255), position="random"),  # 然后添加必要的填充到1024x1024，使用边界模式0（常数填充）
+            ConditionalRandomScale(scale_limit=(-0.5, -0.3), p=1),
             add_shadown(p=0.5),
-            # alb.GaussNoise(20, p=0.8),
-            # alb.GaussianBlur((3, 3), p=0.8),
+            alb.GaussNoise(20, p=0.8),
+            alb.GaussianBlur((3, 3), p=0.8),
             Line_blur(p=0.95),
             watermark(p=0.1),
+            alb.Blur(blur_limit=7, p=1),
+            alb.MotionBlur(blur_limit=(7, 13), p=0.3),  # 动态模糊
             alb.RGBShift(r_shift_limit=10, g_shift_limit=10, b_shift_limit=10, p=0.8),
             alb.RandomBrightnessContrast(p=0.8),  # p=1.0表示总是应用这个变换
-            alb.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10, p=0.8)
+            alb.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10, p=0.8),
         ],
     )
 )
@@ -369,7 +365,7 @@ test_transform =  alb_wrapper(
 )
 
 if __name__ == '__main__':
-    root_path = ""
+    root_path = "./img/"
     image_name = os.listdir(root_path)
     for i in range(10):
         # print(1)

@@ -10,16 +10,17 @@ from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM 
 import torch
 
-model = AutoModelForCausalLM.from_pretrained("/disk1/xizhi/cv/lixumin/Florence-2-base", trust_remote_code=True).to("cuda")
-processor = AutoProcessor.from_pretrained("/disk1/xizhi/cv/lixumin/Florence-2-base", trust_remote_code=True)
+model_path = ""
+model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True).to("cuda")
+processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
 prompt = "<OD>"
 
 # url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg?download=true"
 # image = Image.open(requests.get(url, stream=True).raw)
 
-image_path = ""
-image = Image.open(image_path).convert("RGB")
+url = "./img/1.png"
+image = Image.open(url).convert("RGB")
 
 inputs = processor(text=prompt, images=image, return_tensors="pt").to("cuda")
 

@@ -18,21 +18,49 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, ViTFeatureExtractor
+from transformers import AutoModelForCausalLM, AutoProcessor
 from torch.optim import Adam, AdamW
 from transformers import get_cosine_schedule_with_warmup
+from data import MyDataset
+from transform import train_transform, test_transform
+from PIL import Image
 
+def process_img(path, split):
+    # image_path = path.replace("", "")
+    image = Image.open(path).convert("RGB")
+    if split == "train":
+        image = Image.fromarray(train_transform(image)) 
+    return image
 
 class ModelPLModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.pretrain_model_path = self.config.pretrain_model_path # "/disk1/xizhi/cv/lixumin/Florence-2-base"
+        self.model = None
+        self.max_length = self.config.max_length
+        self.pretrain_model_path = self.config.pretrain_model_path 
         self.model = AutoModelForCausalLM.from_pretrained(self.pretrain_model_path, trust_remote_code=True)
         self.processor = AutoProcessor.from_pretrained(self.pretrain_model_path, trust_remote_code=True)
 
+
     def training_step(self, batch, batch_idx):
-        input_ids, pixel_values, labels  = batch[0]
+        images= [process_img(i, "train") for i in batch[0]]
+        questions= batch[1]
+        answers = batch[2]
+        
+        inputs = self.processor(
+            text=questions, images=images, return_tensors="pt", padding="max_length", max_length=640, truncation=True
+        )
+        input_ids, pixel_values = inputs["input_ids"].to(self.device), inputs["pixel_values"].to(self.device)
+
+        labels = self.processor.tokenizer(
+            text=answers,
+            return_tensors="pt",
+            max_length=self.max_length,
+            padding="max_length",
+            truncation=True,
+            add_special_tokens=False,
+        ).input_ids.to(self.device)
 
         loss = self.model(
             input_ids=input_ids,
@@ -45,21 +73,22 @@ class ModelPLModule(pl.LightningModule):
         return loss
 
 
-    def on_validation_epoch_start(self) -> None:
-        super().on_validation_epoch_start()
-        self.validation_step_outputs = [[] for _ in range(self.num_of_loaders)]
-        return
-
-
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        input_ids, pixel_values, answers = batch
+        images= [process_img(i, "val") for i in batch[0]]
+        questions= batch[1]
+        answers = batch[2]
+
+        inputs = self.processor(
+            text=questions, images=images, return_tensors="pt", padding=True
+        )
+        input_ids, pixel_values = inputs["input_ids"].to(self.device), inputs["pixel_values"].to(self.device)
 
         preds = self.model.generate(
             input_ids=input_ids,
             pixel_values=pixel_values, 
-            max_new_tokens=1024,
-            num_beams=3,
-        )
+            max_new_tokens=self.max_length,
+            num_beams=2,
+            )
         preds = self.processor.batch_decode(preds, skip_special_tokens=False)
         scores = []
         for generated_text, answer in zip(preds, answers):
@@ -73,25 +102,7 @@ class ModelPLModule(pl.LightningModule):
             )
             print("GT:", answer)
             print("Pred:", parsed_answer)
-
-        self.validation_step_outputs[dataloader_idx].append(scores)
         return scores
-
-
-    def on_validation_epoch_end(self):
-        assert len(self.validation_step_outputs) == self.num_of_loaders
-        cnt = [0] * self.num_of_loaders
-        total_metric = [0] * self.num_of_loaders
-        val_metric = [0] * self.num_of_loaders
-        for i, results in enumerate(self.validation_step_outputs):
-            for scores in results:
-                cnt[i] += len(scores)
-                total_metric[i] += np.sum(scores)
-            val_metric[i] = total_metric[i] / cnt[i]
-            val_metric_name = f"val_metric_{i}th_dataset"
-            self.log_dict({val_metric_name: val_metric[i]}, sync_dist=True)
-        self.log_dict({"val_metric": np.sum(total_metric) / np.sum(cnt)}, sync_dist=True)
-
 
     def configure_optimizers(self):
         # optimizer = AdamW(self.parameters(), lr=self.config.lr, betas=(0.9, 0.98), eps=1.0e-6, weight_decay=0.05)
@@ -121,45 +132,45 @@ class DataPLModule(pl.LightningDataModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.train_batch_sizes = self.config.train_batch_sizes
-        self.val_batch_sizes = self.config.val_batch_sizes
-        self.train_datasets = []
-        self.val_datasets = []
+        self.dataset_name_or_path = self.config.dataset_name_or_path
+        self.train_batch_size = self.config.train_batch_size
+        self.val_batch_size = self.config.val_batch_size      
+        self.train_dataset = None 
+        self.val_dataset = None    
         self.g = torch.Generator()
         self.g.manual_seed(self.config.seed)
 
-    def train_dataloader(self):
-        loaders = list()
-        for train_dataset, batch_size in zip(self.train_datasets, self.train_batch_sizes):
-            loaders.append(
-                DataLoader(
-                    train_dataset,
-                    batch_size=batch_size,
-                    num_workers=self.config.num_workers,
-                    pin_memory=True,
-                    worker_init_fn=self.seed_worker,
-                    generator=self.g,
-                    shuffle=True,
-                )
+    def setup(self, stage=None):
+        self.train_dataset = MyDataset(
+                dataset_name_or_path=self.dataset_name_or_path,
+                split="train",
             )
-        return loaders
+        self.val_dataset = MyDataset(
+                dataset_name_or_path=self.dataset_name_or_path,
+                split="val",
+            )
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.train_batch_size,
+            num_workers=self.config.num_workers,
+            pin_memory=True,
+            worker_init_fn=self.seed_worker,
+            generator=self.g,
+            shuffle=True,
+        )
 
     def val_dataloader(self):
-        loaders = list()
-        for val_dataset, batch_size in zip(self.val_datasets, self.val_batch_sizes):
-            loaders.append(
-                DataLoader(
-                    val_dataset,
-                    batch_size=batch_size,
-                    pin_memory=True,
-                    shuffle=False,
-                )
-            )
-        return loaders
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.val_batch_size,
+            pin_memory=True,
+            shuffle=False,
+        )
 
     @staticmethod
-    def seed_worker(wordker_id):
-        worker_seed = torch.initial_seed() % 2 ** 32
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
         np.random.seed(worker_seed)
         random.seed(worker_seed)
-

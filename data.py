@@ -17,31 +17,32 @@ from typing import Any, List, Optional, Union
 import json
 from torchvision import transforms
 import random
-
+from transform import train_transform
 
 class MyDataset(Dataset):
     def __init__(
         self,
-        processor,
         split: str = "train",
         dataset_name_or_path: str = "",
-        task_prompt: str = "",
+        task_prompt: str = "<123>",
     ):
         super().__init__()
         self.split = split
-        self.task_prompt = "<123>"
-        self.processor = processor
+        self.task_prompt = task_prompt
 
-        # 远程加载
+        # 远程下载
         # self.dataset = load_dataset(dataset_name_or_path, split=self.split)
 
-        # 本地加载
+        # 下载在本地
+        self.dataset = load_from_disk(dataset_name_or_path)
         if self.split == "train":
-            self.dataset = load_from_disk(dataset_name_or_path)["train"]
+            self.dataset = self.dataset.filter(lambda x: x['split'] == 'train').select(range(20000))
         else:
-            self.dataset = load_from_disk(dataset_name_or_path)["train"].select(range(200))
+            self.dataset = self.dataset.filter(lambda x: x['split'] == 'test').select(range(80))
+        
         self.dataset_length = len(self.dataset)
-
+        
+        # 获取测试集
         print(f"{self.split}: {self.dataset_length}\n{dataset_name_or_path}")
 
 
@@ -50,29 +51,12 @@ class MyDataset(Dataset):
 
 
     def __getitem__(self, idx):
-        # 为了适应公式数据
         sample = self.dataset[idx]
-        images = sample["image"]
-        question = "Recognize latex text in the image."
-        answer = sample["latex_formula"]
-
-        inputs = self.processor(
-            text=[question], images=[images], return_tensors="pt", padding=True
-        )
-        input_ids, pixel_values = inputs["input_ids"].squeeze(), inputs["pixel_values"].squeeze()
-
-        labels = self.processor.tokenizer(
-            text=answer,
-            return_tensors="pt",
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            add_special_tokens=False,
-        ).input_ids.squeeze()
-        if self.split != "train":
-            return input_ids, pixel_values, [answer]
-
-        return input_ids, pixel_values, labels
+        image = sample["image"]
+        question = sample["question"]
+        answer = sample["answer"]
+        
+        return image, question, answer
 
 
 if __name__ == "__main__":
